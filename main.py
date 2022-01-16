@@ -1487,9 +1487,9 @@ def check_for_aria():
         return True
     except FileNotFoundError:
         return False
-    except Exception as e:
+    except Exception:
         logger.exception(
-            "> Unexpected exception while checking for Aria2c, please tell the program author about this! ", e)
+            "> Unexpected exception while checking for Aria2c, please tell the program author about this! ")
         return True
 
 
@@ -1501,9 +1501,9 @@ def check_for_ffmpeg():
         return True
     except FileNotFoundError:
         return False
-    except Exception as e:
+    except Exception:
         logger.exception(
-            "> Unexpected exception while checking for FFMPEG, please tell the program author about this! ", e)
+            "> Unexpected exception while checking for FFMPEG, please tell the program author about this! ")
         return True
 
 
@@ -1515,9 +1515,9 @@ def check_for_shaka():
         return True
     except FileNotFoundError:
         return False
-    except Exception as e:
+    except Exception:
         logger.exception(
-            "> Unexpected exception while checking for shaka-packager, please tell the program author about this! ", e)
+            "> Unexpected exception while checking for shaka-packager, please tell the program author about this! ")
         return True
 
 
