@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import time
+from typing import IO
 import cloudscraper
 import m3u8
 import requests
@@ -59,6 +60,14 @@ username: str = None
 password: str = None
 headless = True
 selenium = None
+
+
+# from https://stackoverflow.com/a/21978778/9785713
+def log_subprocess_output(prefix: str, pipe: IO[bytes]):
+    if not pipe:
+        return
+    for line in iter(pipe.readline, b''):  # b'\n'-separated lines
+        logger.debug('[%s]: %r', prefix, line.decode("utf8").strip())
 
 
 def parse_config():
@@ -666,9 +675,7 @@ class Udemy:
                             "download_url": f.get("manifest_url")
                         })
                 # ignore audio tracks
-                elif "audio" not in f.get("format_note"):
-                    # unknown format type
-                    logger.debug(f"[-] Unknown format type : {f}")
+                else:
                     continue
         except Exception:
             logger.exception(f"[-] Error fetching MPD streams")
@@ -769,7 +776,8 @@ class Udemy:
             raise Exception("[-] Could not get page body text!")
         if "502 Bad Gateway" in body_text:
             # its a large course, handle accordingly
-            logger.info("[+] Detected large course content, using large content extractor...")
+            logger.info(
+                "[+] Detected large course content, using large content extractor...")
             return self._extract_large_course_content_sub(url=url, selenium=selenium)
         else:
             # get the text from the page
@@ -1346,7 +1354,18 @@ def mux_process(video_title, video_filepath, audio_filepath, output_path):
     else:
         command = "nice -n 7 ffmpeg -y -i \"{}\" -i \"{}\" -acodec copy -vcodec copy -fflags +bitexact -map_metadata -1 -metadata title=\"{}\" \"{}\"".format(
             video_filepath, audio_filepath, video_title, output_path)
-    return os.system(command)
+
+    process = subprocess.Popen(
+        command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    with process.stdout:
+        log_subprocess_output("FFMPEG-STDOUT", process.stdout)
+    with process.stderr:
+        log_subprocess_output("FFMPEG-STDERR", process.stderr)
+    ret_code = process.wait()
+    if ret_code != 0:
+        raise Exception("Muxing returned a non-zero exit code")
+
+    return ret_code
 
 
 def decrypt(kid, in_filepath, out_filepath):
@@ -1355,21 +1374,35 @@ def decrypt(kid, in_filepath, out_filepath):
     """
     try:
         key = keys[kid.lower()]
-        if (os.name == "nt"):
-            ret_code = os.system(f"mp4decrypt --key 1:%s \"%s\" \"%s\"" %
-                                 (key, in_filepath, out_filepath))
-        else:
-            ret_code = os.system(f"nice -n 7 mp4decrypt --key 1:%s \"%s\" \"%s\"" %
-                                 (key, in_filepath, out_filepath))
-        return ret_code
     except KeyError:
         raise KeyError("[-] Key not found")
+
+    if (os.name == "nt"):
+        command = f"shaka-packager --enable_raw_key_decryption --keys key_id={kid}:key={key} input=\"{in_filepath}\",stream_selector=\"0\",output=\"{out_filepath}\""
+    else:
+        command = f"nice -n 7 shaka-packager --enable_raw_key_decryption --keys key_id={kid}:key={key} input=\"{in_filepath}\",stream_selector=\"0\",output=\"{out_filepath}\""
+
+    process = subprocess.Popen(
+        command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    with process.stdout:
+        log_subprocess_output("SHAKA-STDOUT", process.stdout)
+    with process.stderr:
+        log_subprocess_output("SHAKA-STDERR", process.stderr)
+    ret_code = process.wait()
+    if ret_code != 0:
+        raise Exception("Decryption returned a non-zero exit code")
+
+    return ret_code
 
 
 def handle_segments(url, format_id, video_title,
                     output_path, lecture_file_name, chapter_dir):
     os.chdir(os.path.join(chapter_dir))
-    file_name = lecture_file_name.replace("%", "").replace(".mp4", "")
+    file_name = lecture_file_name.replace(
+        "%", "")
+    # commas cause problems with shaka-packager resulting in decryption failure
+    file_name = file_name.replace(",", "")
+    file_name = file_name.replace(".mp4", "")
     video_filepath_enc = file_name + ".encrypted.mp4"
     audio_filepath_enc = file_name + ".encrypted.m4a"
     video_filepath_dec = file_name + ".decrypted.mp4"
@@ -1384,7 +1417,13 @@ def handle_segments(url, format_id, video_title,
     if disable_ipv6:
         args.append("--downloader-args")
         args.append("aria2c:\"--disable-ipv6\"")
-    ret_code = subprocess.Popen(args).wait()
+    process = subprocess.Popen(
+        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    with process.stdout:
+        log_subprocess_output("YTDLP-STDOUT", process.stdout)
+    with process.stderr:
+        log_subprocess_output("YTDLP-STDERR", process.stderr)
+    ret_code = process.wait()
     logger.info("> Lecture Tracks Downloaded")
 
     logger.debug("[-] Return code: " + str(ret_code))
@@ -1434,9 +1473,10 @@ def handle_segments(url, format_id, video_title,
         os.remove(audio_filepath_enc)
         os.remove(video_filepath_dec)
         os.remove(audio_filepath_dec)
-        os.chdir(HOME_DIR)
     except Exception:
         logger.exception(f"[-] Error: ")
+    finally:
+        os.chdir(HOME_DIR)
 
 
 def check_for_aria():
@@ -1447,9 +1487,9 @@ def check_for_aria():
         return True
     except FileNotFoundError:
         return False
-    except Exception:
+    except Exception as e:
         logger.exception(
-            "> Unexpected exception while checking for Aria2c, please tell the program author about this! ")
+            "> Unexpected exception while checking for Aria2c, please tell the program author about this! ", e)
         return True
 
 
@@ -1461,15 +1501,15 @@ def check_for_ffmpeg():
         return True
     except FileNotFoundError:
         return False
-    except Exception:
+    except Exception as e:
         logger.exception(
-            "> Unexpected exception while checking for FFMPEG, please tell the program author about this! ")
+            "> Unexpected exception while checking for FFMPEG, please tell the program author about this! ", e)
         return True
 
 
-def check_for_mp4decrypt():
+def check_for_shaka():
     try:
-        subprocess.Popen(["mp4decrypt"],
+        subprocess.Popen(["shaka-packager", "-version"],
                          stderr=subprocess.DEVNULL,
                          stdout=subprocess.DEVNULL).wait()
         return True
@@ -1477,7 +1517,7 @@ def check_for_mp4decrypt():
         return False
     except Exception as e:
         logger.exception(
-            "> Unexpected exception while checking for MP4Decrypt, please tell the program author about this! ")
+            "> Unexpected exception while checking for shaka-packager, please tell the program author about this! ", e)
         return True
 
 
@@ -1519,7 +1559,12 @@ def download_aria(url, file_dir, filename):
     ]
     if disable_ipv6:
         args.append("--disable-ipv6")
-    ret_code = subprocess.Popen(args).wait()
+    process = subprocess.Popen(args)
+    with process.stdout:
+        log_subprocess_output("ARIA2-STDOUT", process.stdout)
+    with process.stderr:
+        log_subprocess_output("ARIA2-STDERR", process.stderr)
+    ret_code = process.wait()
     if ret_code != 0:
         raise Exception("Return code from the downloader was non-0 (error)")
     return ret_code
@@ -1615,7 +1660,14 @@ def process_lecture(lecture, lecture_path, lecture_file_name, chapter_dir):
                         if disable_ipv6:
                             args.append("--downloader-args")
                             args.append("aria2c:\"--disable-ipv6\"")
-                        ret_code = subprocess.Popen(args).wait()
+                        process = subprocess.Popen(args)
+                        with process.stdout:
+                            log_subprocess_output(
+                                "YTDLP-STDOUT", process.stdout)
+                        with process.stderr:
+                            log_subprocess_output(
+                                "YTDLP-STDERR", process.stderr)
+                        ret_code = process.wait()
                         if ret_code == 0:
                             # os.rename(temp_filepath, lecture_path)
                             logger.info("      > HLS Download success")
@@ -1859,10 +1911,10 @@ def main():
         logger.fatal("> FFMPEG is missing from your system or path!")
         sys.exit(1)
 
-    mp4decrypt_ret_val = check_for_mp4decrypt()
-    if not mp4decrypt_ret_val:
+    shaka_ret_val = check_for_shaka()
+    if not shaka_ret_val:
         logger.fatal(
-            "> MP4Decrypt is missing from your system or path! (This is part of Bento4 tools)"
+            "> Shaka Packager is missing from your system or path!"
         )
         sys.exit(1)
 
