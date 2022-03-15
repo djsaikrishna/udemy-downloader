@@ -64,10 +64,10 @@ selenium = None
 
 # from https://stackoverflow.com/a/21978778/9785713
 def log_subprocess_output(prefix: str, pipe: IO[bytes]):
-    if not pipe:
-        return
-    for line in iter(pipe.readline, b''):  # b'\n'-separated lines
-        logger.debug('[%s]: %r', prefix, line.decode("utf8").strip())
+    if pipe:
+        for line in iter(pipe.readline, b''):  # b'\n'-separated lines
+            logger.debug('[%s]: %r', prefix, line.decode("utf8").strip())
+        pipe.flush()
 
 
 def parse_config():
@@ -1349,18 +1349,16 @@ def mux_process(video_title, video_filepath, audio_filepath, output_path):
     @author Jayapraveen
     """
     if os.name == "nt":
-        command = "ffmpeg -y -i \"{}\" -i \"{}\" -acodec copy -vcodec copy -fflags +bitexact -map_metadata -1 -metadata title=\"{}\" \"{}\"".format(
+        command = "ffmpeg -nostdin -loglevel error -y -i \"{}\" -i \"{}\" -acodec copy -vcodec copy -fflags +bitexact -map_metadata -1 -metadata title=\"{}\" \"{}\"".format(
             video_filepath, audio_filepath, video_title, output_path)
     else:
-        command = "nice -n 7 ffmpeg -y -i \"{}\" -i \"{}\" -acodec copy -vcodec copy -fflags +bitexact -map_metadata -1 -metadata title=\"{}\" \"{}\"".format(
+        command = "nice -n 7 ffmpeg -nostdin -loglevel error -y -i \"{}\" -i \"{}\" -acodec copy -vcodec copy -fflags +bitexact -map_metadata -1 -metadata title=\"{}\" \"{}\"".format(
             video_filepath, audio_filepath, video_title, output_path)
 
     process = subprocess.Popen(
-        command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    with process.stdout:
-        log_subprocess_output("FFMPEG-STDOUT", process.stdout)
-    with process.stderr:
-        log_subprocess_output("FFMPEG-STDERR", process.stderr)
+        command, shell=True)
+    log_subprocess_output("FFMPEG-STDOUT", process.stdout)
+    log_subprocess_output("FFMPEG-STDERR", process.stderr)
     ret_code = process.wait()
     if ret_code != 0:
         raise Exception("Muxing returned a non-zero exit code")
@@ -1383,11 +1381,9 @@ def decrypt(kid, in_filepath, out_filepath):
         command = f"nice -n 7 shaka-packager --enable_raw_key_decryption --keys key_id={kid}:key={key} input=\"{in_filepath}\",stream_selector=\"0\",output=\"{out_filepath}\""
 
     process = subprocess.Popen(
-        command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    with process.stdout:
-        log_subprocess_output("SHAKA-STDOUT", process.stdout)
-    with process.stderr:
-        log_subprocess_output("SHAKA-STDERR", process.stderr)
+        command, shell=True)
+    log_subprocess_output("SHAKA-STDOUT", process.stdout)
+    log_subprocess_output("SHAKA-STDERR", process.stderr)
     ret_code = process.wait()
     if ret_code != 0:
         raise Exception("Decryption returned a non-zero exit code")
@@ -1418,11 +1414,9 @@ def handle_segments(url, format_id, video_title,
         args.append("--downloader-args")
         args.append("aria2c:\"--disable-ipv6\"")
     process = subprocess.Popen(
-        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    with process.stdout:
-        log_subprocess_output("YTDLP-STDOUT", process.stdout)
-    with process.stderr:
-        log_subprocess_output("YTDLP-STDERR", process.stderr)
+        args)
+    log_subprocess_output("YTDLP-STDOUT", process.stdout)
+    log_subprocess_output("YTDLP-STDERR", process.stderr)
     ret_code = process.wait()
     logger.info("> Lecture Tracks Downloaded")
 
