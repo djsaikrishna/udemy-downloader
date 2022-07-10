@@ -1,7 +1,7 @@
 mpegdash
 tqdm
 requests
-protobuf
+protobuf==3.20.0
 webvtt-py
 pysrt
 m3u8
