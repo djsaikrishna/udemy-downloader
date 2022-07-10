@@ -65,7 +65,7 @@ selenium = None
 # from https://stackoverflow.com/a/21978778/9785713
 def log_subprocess_output(prefix: str, pipe: IO[bytes]):
     if pipe:
-        for line in iter(pipe.readline, b''):  # b'\n'-separated lines
+        for line in iter(lambda: pipe.read(1), ""):
             logger.debug('[%s]: %r', prefix, line.decode("utf8").strip())
         pipe.flush()
 
@@ -1581,10 +1581,8 @@ def download_aria(url, file_dir, filename):
     if disable_ipv6:
         args.append("--disable-ipv6")
     process = subprocess.Popen(args)
-    with process.stdout:
-        log_subprocess_output("ARIA2-STDOUT", process.stdout)
-    with process.stderr:
-        log_subprocess_output("ARIA2-STDERR", process.stderr)
+    log_subprocess_output("ARIA2-STDOUT", process.stdout)
+    log_subprocess_output("ARIA2-STDERR", process.stderr)
     ret_code = process.wait()
     if ret_code != 0:
         raise Exception("Return code from the downloader was non-0 (error)")
@@ -1682,11 +1680,9 @@ def process_lecture(lecture, lecture_path, lecture_file_name, chapter_dir):
                             args.append("--downloader-args")
                             args.append("aria2c:\"--disable-ipv6\"")
                         process = subprocess.Popen(args)
-                        with process.stdout:
-                            log_subprocess_output(
+                        log_subprocess_output(
                                 "YTDLP-STDOUT", process.stdout)
-                        with process.stderr:
-                            log_subprocess_output(
+                        log_subprocess_output(
                                 "YTDLP-STDERR", process.stderr)
                         ret_code = process.wait()
                         if ret_code == 0:
